@@ -5,71 +5,91 @@ import jsdom from "jsdom";
 export function getUrlFromMsg(msg) {
   //citation: https://stackoverflow.com/a/6041965/3586860
   const match = msg.match(
-    /(http|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])/
+      /(http|https):\/\/([\w_-]+(?:(?:\.[\w_-]+)+))([\w.,@?^=%&:\/~+#-]*[\w@?^=%&\/~+#-])/
   );
   if (match?.length) {
     return match[0];
   }
-  return false;
+  return "";
 }
 
-//martin
-// https://stackoverflow.com/questions/3809401/what-is-a-good-regular-expression-to-match-a-url
-export function isUrl(text) {
-  return (
-    !!text &&
-    text.match(
-      /(https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|www\.[a-zA-Z0-9][a-zA-Z0-9-]+[a-zA-Z0-9]\.[^\s]{2,}|https?:\/\/(?:www\.|(?!www))[a-zA-Z0-9]+\.[^\s]{2,}|www\.[a-zA-Z0-9]+\.[^\s]{2,})/gi
-    )
-  );
+
+export function getTimeFromMsg(msg) {
+  const match = msg.match(/\d{2,}(:\d{2})?(:\d{2})?/);
+  if (match?.length) {
+    return match[0];
+  }
+  return null;
 }
-const CONTENT_VIDEO = "VIDEO"
-const CONTENT_TEXT = "TEXT"
+
+const CONTENT_VIDEO = "VIDEO";
+const CONTENT_URL = "URL";
 export function getContentType(url) {
-  if (url.includes("youtube.com")) {
-    return CONTENT_VIDEO;  
+  if (url.includes("youtube.com/watch") || url.includes("youtu.be") || url.includes("youtube.com/embed")) {
+    return CONTENT_VIDEO;
+  } else if (getUrlFromMsg(url) !== "") {
+    return CONTENT_URL;
   } else {
-    return CONTENT_TEXT;
+    return ""
   }
 }
 
 export async function getVideoLength(url) {
-  if (url.includes("youtube.com")) {
-    // TODO post request to https://yt5s.com/api/ajaxSearch
-    // with User-Agent e.g. Mozzila
+  const res = await fetch("https://yt5s.com/api/ajaxSearch", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "User-Agent": "Mozzila"
+    },
+    body: new URLSearchParams({
+      'q': url,
+      'vt': "home",
+    })
+  });
+  const data = await res.json();
 
-    const res = await fetch('https://yt5s.com/api/ajaxSearch', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'User-Agent': 'Mozzila'
-      },
-      body: {
-        q: url, vt: "home"
-      }
-    });
-    
-    console.log("aaaaa", res)
+  return Math.ceil(data?.t / 60)
+  // return data?.t;
+}
 
-    // let response = ...
-    // timeInSec = response['t']
+export async function getDurationFromUrl(url) {
+  switch(getContentType(url)) {
+    case CONTENT_VIDEO:
+      return getVideoLength(url);
+    case CONTENT_URL:
+      return getTextLengthFromUrl(url);
+    default:
+      return ""
   }
 }
-export async function getTextLengthFromUrl(url) {
-  // creates express http server
+
+async function getTextLengthFromUrl(url) {
   if (!url) {
     return false;
   }
-  //https://www.npmjs.com/package/innertext
+
   try {
     const res = await fetch(url);
     const data = await res.text();
     const doc = new jsdom.JSDOM(data, "text/html");
-    const mainElement = doc.window.document.querySelector("article");
-    const mainText = mainElement.textContent;
+    let mainElement = doc.window.document.querySelectorAll("article");
+    if (!mainElement || !mainElement.length) {
+      mainElement = doc.window.document.querySelectorAll(".content");
+      if (!mainElement || !mainElement.length) {
+        mainElement = doc.window.document.body;
+      }
+    }
+    let mainText = "";
+    if (mainElement.length) {
+      mainElement.forEach(elem => {
+        mainText += " " + elem.textContent;
+      });
+    } else {
+      mainText = mainElement.textContent;
+    }
+    mainText = mainText.replace(/\s+/g, " ");
     const countOfWords = mainText.split(" ").length;
     const humanReadSpeed = 300;
-    console.log(`count: ${countOfWords}`);
     return Math.ceil(countOfWords / humanReadSpeed);
   } catch (e) {
     console.error(e);

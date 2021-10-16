@@ -15,7 +15,9 @@ export function getUrlFromMsg(msg) {
 
 
 export function getTimeFromMsg(msg) {
-  const match = msg.match(/\d{2,}(:\d{2})?(:\d{2})?/);
+  const match = msg.match(/^\d{1,}(:\d{2})?(:\d{2})?$/)
+      || msg.match(/^\d+(min|m| min| m|minutes| minutes)$/);
+
   if (match?.length) {
     return match[0];
   }
@@ -70,7 +72,9 @@ async function getTextLengthFromUrl(url) {
 
   try {
     const res = await fetch(url);
+    //TODO OMZENI NA VELIKOST STRANKY
     const data = await res.text();
+    console.log('length',data.length);
     const doc = new jsdom.JSDOM(data, "text/html");
     let mainElement = doc.window.document.querySelectorAll("article");
     if (!mainElement || !mainElement.length) {
@@ -89,7 +93,7 @@ async function getTextLengthFromUrl(url) {
     }
     mainText = mainText.replace(/\s+/g, " ");
     const countOfWords = mainText.split(" ").length;
-    const humanReadSpeed = 300;
+    const humanReadSpeed = 250;
     return Math.ceil(countOfWords / humanReadSpeed);
   } catch (e) {
     console.error(e);

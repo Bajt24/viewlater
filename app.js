@@ -22,6 +22,49 @@ const db = new Db();
 app.listen(process.env.PORT || 1337, () => console.log("webhook is listening"));
 
 // Accepts POST requests at /webhook endpoint
+app.get("/calendarhook", (req, res) => {
+    // Parse the request body from the POST
+    let body = req.body;
+    console.log(req.query);
+    res.sendStatus(200);
+});
+// Accepts POST requests at /webhook endpoint
+app.post("/calendarhook", (req, res) => {
+    // Parse the request body from the POST
+    let body = req.body;
+    console.log(req);
+    res.sendStatus(200);
+    return;
+    // Check the webhook event is from a Page subscription
+    if (body.object === "page") {
+        // Iterate over each entry - there may be multiple if batched
+        body.entry.forEach(function(entry) {
+            // Gets the body of the webhook event
+            let webhook_event = entry.messaging[0];
+            // console.log(webhook_event);
+
+            // Get the sender PSID
+            let sender_psid = webhook_event.sender.id;
+            console.log("Sender PSID: " + sender_psid);
+
+            // Check if the event is a message or postback and
+            // pass the event to the appropriate handler function
+            if (webhook_event.message) {
+                handleMessage(sender_psid, webhook_event.message);
+            } else if (webhook_event.postback) {
+                handlePostback(sender_psid, webhook_event.postback);
+            }
+        });
+
+        // Return a '200 OK' response to all events
+        res.status(200).send("EVENT_RECEIVED");
+    } else {
+        // Return a '404 Not Found' if event is not from a page subscription
+        res.sendStatus(404);
+    }
+});
+
+// Accepts POST requests at /webhook endpoint
 app.post("/webhook", (req, res) => {
     // Parse the request body from the POST
     let body = req.body;
@@ -33,7 +76,6 @@ app.post("/webhook", (req, res) => {
             // Gets the body of the webhook event
             let webhook_event = entry.messaging[0];
             // console.log(webhook_event);
-
 
             // Get the sender PSID
             let sender_psid = webhook_event.sender.id;
@@ -58,9 +100,7 @@ app.post("/webhook", (req, res) => {
 
 // Accepts GET requests at the /webhook endpoint
 app.get("/webhook", (req, res) => {
-    console.log(req);
-    /** UPDATE YOUR VERIFY TOKEN **/
-    const VERIFY_TOKEN = "hp21token";
+    const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 
     // Parse params from the webhook verification request
     let mode = req.query["hub.mode"];
@@ -72,8 +112,8 @@ app.get("/webhook", (req, res) => {
         // Check the mode and token sent are correct
         if (mode === "subscribe" && token === VERIFY_TOKEN) {
             // Respond with 200 OK and challenge token from the request
-            console.log("WEBHOOK_VERIFIED");
-            console.log(req);
+            // console.log("WEBHOOK_VERIFIED");
+
             res.status(200).send(challenge);
         } else {
             // Responds with '403 Forbidden' if verify tokens do not match
@@ -99,18 +139,44 @@ async function handleMessage(senderPsid, receivedMessage) {
                 text: `Your content is saved, the view time is ${duration} minutes`
             };
         } else {
-            let time = getTimeFromMsg(receivedMessage.text);
-            if (time != null) {
-                let url = db.getItem(senderPsid, time)
-                console.log("urllll", url)
+            const time = getTimeFromMsg(receivedMessage.text);
+            if (time) {
+                //TODO WHAT IS RETURN NULL FROM DB ??????????
+                let savedItem = db.getItem(senderPsid, time)?.[0];
+                if (!savedItem) {
+                    response = { text: "Sorry, you don't have any unread links :/" };
+                    await callSendAPI(senderPsid, response);
+                    return;
+                }
+
+                const savedItemUrl = savedItem["link"];
+                const savedItemDuration = savedItem["duration"];
+
                 response = {
-                    text: `Suggesting reading for ${time} minutes: ${url}"`
+                    attachment: {
+                        type: "template",
+                        payload: {
+                            template_type: "button",
+                            text: `Your content for ${savedItemDuration} minutes:`,
+                            buttons: [
+                                {
+                                    type: "web_url",
+                                    url: savedItemUrl,
+                                    title: savedItemUrl,
+                                    webview_height_ratio: "full"
+                                }
+                            ]
+                        }
+                    }
                 };
+                await callSendAPI(senderPsid, response);
+                const savedItemId = savedItem["id"];
+                response = getActionsButton("Choose your next action: ", savedItemId);
             } else {
                 // Create the payload for a basic text message, which
                 // will be added to the body of your request to the Send API
                 response = {
-                    text: `Hello, Martin :) ${url}`
+                    text: "Sorry, I didn't understand that :/"
                 };
             }
         }
@@ -124,19 +190,19 @@ async function handleMessage(senderPsid, receivedMessage) {
                     template_type: "generic",
                     elements: [
                         {
-                            title: "Is this the right picture?",
-                            subtitle: "Tap a button to answer.",
+                            title: "Nice picture!",
+                            subtitle: ":)",
                             image_url: attachmentUrl,
                             buttons: [
                                 {
                                     type: "postback",
-                                    title: "Yes!",
-                                    payload: "yes"
+                                    title: "Thanks!",
+                                    payload: "thanks"
                                 },
                                 {
                                     type: "postback",
-                                    title: "No!",
-                                    payload: "no"
+                                    title: "<3",
+                                    payload: "love"
                                 }
                             ]
                         }
@@ -151,18 +217,37 @@ async function handleMessage(senderPsid, receivedMessage) {
 }
 
 // Handles messaging_postbacks events
-function handlePostback(senderPsid, receivedPostback) {
+async function handlePostback(senderPsid, receivedPostback) {
     let response;
 
     // Get the payload for the postback
     let payload = receivedPostback.payload;
 
     // Set the response based on the postback payload
-    if (payload === "yes") {
-        response = { text: "Thanks!" };
-    } else if (payload === "no") {
-        response = { text: "Oops, try sending another image." };
+    // if (payload === "yes") {
+    //   response = { text: "Thanks!" };
+    // } else if (payload === "no") {
+    //   response = { text: "Oops, try sending another image." };
+    // }
+    const arr = payload.split(" ");
+    const action = arr[0];
+    const id = arr[1];
+
+    switch (action) {
+        case "read":
+            response = { text: "Content deleted" };
+            db.deleteRecord(id);
+            break;
+        case "next":
+            response = { text: "Sending next content." };
+            // await callSendAPI(senderPsid, response);
+            // TODO
+            // response = getActionsButton("Choose your next action: ", id)
+            break;
+        default:
+            response = { text: "Error" };
     }
+
     // Send the message to acknowledge the postback
     callSendAPI(senderPsid, response);
 }
@@ -196,4 +281,32 @@ function callSendAPI(senderPsid, response) {
             }
         }
     );
+}
+
+function getActionsButton(title, savedItemId) {
+    return {
+        attachment: {
+            type: "template",
+            payload: {
+                template_type: "generic",
+                elements: [
+                    {
+                        title,
+                        buttons: [
+                            {
+                                type: "postback",
+                                title: "Finished reading",
+                                payload: `read ${savedItemId}`
+                            },
+                            {
+                                type: "postback",
+                                title: "Next content",
+                                payload: `next ${savedItemId}`
+                            }
+                        ]
+                    }
+                ]
+            }
+        }
+    };
 }

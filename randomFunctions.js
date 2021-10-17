@@ -54,7 +54,7 @@ export async function getVideoLength(url) {
   });
   const data = await res.json();
 
-  return {duration: Math.ceil(data?.t / 60), title: data.title };
+  return { duration: Math.ceil(data?.t / 60), title: data.title };
   // return data?.t;
 }
 
@@ -65,7 +65,7 @@ export async function getDurationFromUrl(url) {
     case CONTENT_URL:
       return getTextLengthFromUrl(url);
     default:
-      return "";
+      return {"title":undefined,"duration": undefined};
   }
 }
 
@@ -89,9 +89,12 @@ async function getTextLengthFromUrl(url) {
     const doc = new jsdom.JSDOM(data, "text/html");
     let mainElement = doc.window.document.querySelectorAll("article");
     if (!mainElement || !mainElement.length) {
-      mainElement = doc.window.document.querySelectorAll(".content");
+      mainElement = doc.window.document.querySelectorAll(".article");
       if (!mainElement || !mainElement.length) {
-        mainElement = doc.window.document.body;
+        mainElement = doc.window.document.querySelectorAll(".content");
+        if (!mainElement || !mainElement.length) {
+          mainElement = doc.window.document.body;
+        }
       }
     }
     let mainText = "";

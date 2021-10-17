@@ -19,7 +19,8 @@
     "request": "^2.72.0",
     "node-fetch": "^3.0.0",
     "jsdom": "^18.0.0",
-    "better-sqlite3": "^7.4.3"
+    "better-sqlite3": "^7.4.3",
+    "utf8": "^3.0.0"
   },
   "engines": {
     "node": "~14.18.1"

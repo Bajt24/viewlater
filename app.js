@@ -3,6 +3,7 @@
 import request from "request";
 import express from "express";
 import body_parser from "body-parser";
+import utf8 from "utf8";
 import {
     getDurationFromUrl,
     getUrlFromMsg,
@@ -13,7 +14,6 @@ import { Db } from "./db.js";
 
 const app = express().use(body_parser.json()); // creates express http server
 
-//const db = require("./db");
 const db = new Db();
 //db.createTable();
 
@@ -27,6 +27,19 @@ app.get("/calendarhook", (req, res) => {
     console.log(body);
     res.sendStatus(200);
 });
+
+// Accepts POST requests at /webhook endpoint
+app.post("/ythook", async (req, res) => {
+    // Parse the request body from the POST
+    let body = req.body;
+    console.log(body);
+    let userid = "4017100845057314";
+    let duration = body.duration_formatted
+        .split(":")
+        .reduce((acc, time) => 60 * acc + +time); //'0:0:26 to int
+    db.saveItem(userid, body.title, body.url, duration);
+    res.sendStatus(200);
+});
 // Accepts POST requests at /webhook endpoint
 app.post("/calendarhook", async (req, res) => {
     // Parse the request body from the POST
@@ -38,7 +51,7 @@ app.post("/calendarhook", async (req, res) => {
     const savedItemId = savedItem["id"];
     const savedItemUrl = savedItem["link"];
     const savedItemDuration = savedItem["duration"];
-    const savedTitle = savedItem["title"];
+    const savedTitle = utf8.decode(savedItem["title"]);
 
     // const now = Date.now();
     // let d = Date.parse(body.start)
@@ -48,7 +61,7 @@ app.post("/calendarhook", async (req, res) => {
     // }
     let desc = body.description.toLowerCase();
     let title = body.description.toLowerCase();
-    let combo = desc + ' ' + title;
+    let combo = desc + " " + title;
     if (
         combo.includes("departure") ||
         combo.includes("arrival") ||
@@ -98,11 +111,11 @@ app.post("/webhook", (req, res) => {
         // Iterate over each entry - there may be multiple if batched
         body.entry.forEach(function(entry) {
             // Gets the body of the webhook event
-            let webhook_event = entry.messaging[0];
+            const webhook_event = entry.messaging[0];
             // console.log(webhook_event);
 
             // Get the sender PSID
-            let sender_psid = webhook_event.sender.id;
+            const sender_psid = webhook_event.sender.id;
             console.log("Sender PSID: " + sender_psid);
 
             // Check if the event is a message or postback and
@@ -146,18 +159,17 @@ app.get("/webhook", (req, res) => {
     }
 });
 
-const ACTION_SAVE = 1;
 async function getSavedLink(senderPsid, time, usedItemIds = []) {
     let savedItem = db.getItem(senderPsid, time, usedItemIds)?.[0];
     if (!savedItem) {
-        return { text: "Sorry, you don't have any unread links :/" };
+        return { text: "❌ Sorry, you don't have any unread links :/" };
     }
 
     const savedItemUrl = savedItem["link"];
-    const savedItemTitle = savedItem["title"];
+    const savedItemTitle = utf8.decode(savedItem["title"]);
     const savedItemDuration = savedItem["duration"];
 
-    let response = {
+    const response = {
         attachment: {
             type: "template",
             payload: {
@@ -187,53 +199,124 @@ async function getSavedLink(senderPsid, time, usedItemIds = []) {
     );
 }
 
+async function sendSelectedArticle(senderPsid, article) {
+    let savedItem = db.getItemOffset(senderPsid, article-1);
+    if (!savedItem) return { text: "❌ Sorry, that didn't work" };
+
+    const savedItemUrl = savedItem["link"];
+    const savedItemTitle = utf8.decode(savedItem["title"]);
+    const savedItemDuration = savedItem["duration"];
+    const savedItemId = savedItem["id"];
+
+    const response = {
+        attachment: {
+            type: "template",
+            payload: {
+                template_type: "button",
+                text: `Your content "${savedItemTitle}" for ${savedItemDuration} minutes:`,
+                buttons: [
+                    {
+                        type: "web_url",
+                        url: savedItemUrl,
+                        title: savedItemUrl,
+                        webview_height_ratio: "full"
+                    }
+                ]
+            }
+        }
+    };
+    await callSendAPI(senderPsid, response);
+
+    return getActionsButton(
+        "Choose your next action: ",
+        savedItemId,
+        savedItemDuration,
+        [savedItemId]
+    );
+}
+
 // Handles messages events
 async function handleMessage(senderPsid, receivedMessage) {
     let response;
+    await callSendAPI(senderPsid, response, true);
 
     // Checks if the message contains text
     if (receivedMessage.text) {
         const url = getUrlFromMsg(receivedMessage.text);
         if (url) {
             const obj = await getDurationFromUrl(url);
-            const duration = obj.duration;
-            const title = obj.title;
+            const { duration, title } = obj;
             if (duration) {
-                if (!db.saveItem(senderPsid, title, url, duration)) {
-                    response = {
-                        text: `😥😭😥 Your content is NOT saved, the view time would be ${duration} minutes 😥😭😥`
-                    };
-                } else {
-                    response = {
-                        text: `Your content is saved, the view time is ${duration} minutes`
-                    };
+                try {
+                    const res = db.saveItem(
+                        senderPsid,
+                        utf8.encode(title),
+                        url,
+                        duration
+                    );
+                    if (!res) {
+                        response = {
+                            text: `❌ This content is already in your list`
+                        };
+                    } else {
+                        response = {
+                            text: `✔️ Your content is saved, the view time is ${duration} minutes`
+                        };
+                    }
+                } catch (e) {
+                    console.error(e);
                 }
             } else {
                 response = {
-                    text: "Sorry, the url is not accessable or the content is too long."
+                    text:
+                        "❌ Sorry, the url is not accessible or the content is too long."
                 };
             }
         } else if (receivedMessage.text.startsWith(".help")) {
             response = {
-                text: "Welcome to ViewLater, use .list to display items..."
+                text:
+                    "Welcome to ViewLater, \n\nsend a link to save an article\n\n.list to view your saved articles\n\n.select <id> to an article a link from list\n\nsend number of minutes to get our AI recommendation for an article based on your time :)"
             };
         } else if (receivedMessage.text.startsWith(".list")) {
             const results = db.getRecordsForUser(senderPsid);
-            let text = "";
-            results.forEach((item, index) => {
-                text += index + 1 + ") " + item.title + " (" + item.duration + " min)";
-                if (index != results.length - 1) text += "\n\n";
-            });
-            response = {
-                text: text
-            };
+            if (results.length == 0) {
+                response = {
+                    text:
+                        "You have no articles saved :/\nStart your journey by sending links"
+                };
+            } else {
+                let text = "";
+                results.forEach((item, index) => {
+                    text +=
+                        index +
+                        1 +
+                        ") " +
+                        utf8.decode(item.title) +
+                        " (" +
+                        item.duration +
+                        " min)";
+                    if (index != results.length - 1) text += "\n\n";
+                });
+                response = {
+                    text: text + "\n\nUse .select <id> to view an article"
+                };
+            }
         } else if (receivedMessage.text.startsWith(".count")) {
             response = {
                 text: "DB contains " + db.countRecords() + " records"
             };
+        } else if (receivedMessage.text.startsWith(".select")) {
+            const arr = receivedMessage.text.split(" ");
+            if (arr.length != 2 || isNaN(parseInt(arr[1]))) {
+                response = {
+                    text: "Wrong usage, use .select <id>"
+                };
+            } else {
+                response = await sendSelectedArticle(senderPsid, parseInt(arr[1]));
+            }
         } else if (receivedMessage.text.startsWith(".id")) {
             response = {
-                text: "👨‍🦼 Your id is " + senderPsid + " 👨‍🦼"
+                text: "Your id is " + senderPsid
             };
         } else {
             const time = getTimeFromMsg(receivedMessage.text);
@@ -243,7 +326,7 @@ async function handleMessage(senderPsid, receivedMessage) {
                 // Create the payload for a basic text message, which
                 // will be added to the body of your request to the Send API
                 response = {
-                    text: "Sorry, I didn't understand that :/"
+                    text: "❌ Sorry, I didn't understand that :/"
                 };
             }
         }
@@ -290,20 +373,10 @@ async function handlePostback(senderPsid, receivedPostback) {
     // Get the payload for the postback
     let payload = JSON.parse(receivedPostback.payload);
 
-    // Set the response based on the postback payload
-    // if (payload === "yes") {
-    //   response = { text: "Thanks!" };
-    // } else if (payload === "no") {
-    //   response = { text: "Oops, try sending another image." };
-    // }
-    // const arr = payload.split(" ");
-    // const action = arr[0];
-    // const id = arr[1];
-
     switch (payload.action) {
         case "read":
-            response = { text: "Content deleted" };
-            db.deleteRecord(payload.data.savedItemId);
+            response = { text: "Cool, we won't show it again!" };
+            db.readRecord(payload.data.savedItemId);
             break;
         case "next":
             response = await getSavedLink(
@@ -321,7 +394,7 @@ async function handlePostback(senderPsid, receivedPostback) {
 }
 
 // Sends response messages via the Send API
-function callSendAPI(senderPsid, response) {
+async function callSendAPI(senderPsid, response, animation = false) {
     // The page access token we have generated in your app settings
     const PAGE_ACCESS_TOKEN = process.env.PAGE_ACCESS_TOKEN;
 
@@ -330,11 +403,20 @@ function callSendAPI(senderPsid, response) {
         recipient: {
             id: senderPsid
         },
-        message: response
+        sender_action: animation ? "typing_on" : "typing_off"
     };
 
+    if (response) {
+        requestBody = {
+            recipient: {
+                id: senderPsid
+            },
+            message: response
+        };
+    }
+
     // Send the HTTP request to the Messenger Platform
-    request(
+    await request(
         {
             uri: "https://graph.facebook.com/v2.6/me/messages",
             qs: { access_token: PAGE_ACCESS_TOKEN },

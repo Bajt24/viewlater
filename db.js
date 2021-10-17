@@ -1,54 +1,97 @@
 import Database from "better-sqlite3";
 export class Db {
-
   constructor() {
     //-this.sqlite3 = require('sqlite3').verbose();
-    this.db = new Database('db.sqlite');
+    this.db = new Database("db.sqlite");
 
     const res = this.checkTableExists();
     //console.log(res);
-    if (res == null)
-      this.createTable();
+    if (res == null) this.createTable();
 
-    console.log("====== V DATABAZI JE " + this.countRecords()+ " ZAZNAMU, TY KRIPLE ======");
+    console.log(
+        "====== V DATABAZI JE " +
+        this.countRecords() +
+        " ZAZNAMU, TY HLUPAKU ======"
+    );
   }
 
   countRecords() {
     return this.db.prepare("SELECT COUNT(*) as count FROM data").get()["count"];
   }
 
-  deleteRecord(id){
+  deleteRecord(id) {
     this.db.prepare("DELETE FROM data WHERE id = ?").run(id);
   }
 
+  readRecord(id) {
+    this.db.prepare("UPDATE data SET read = 1 WHERE id = ?").run(id);
+  }
+
   createTable() {
-    this.db.prepare("CREATE TABLE data (id INTEGER PRIMARY KEY AUTOINCREMENT, userid TEXT, title TEXT, link TEXT, duration INTEGER, timestamp TEXT, read INTEGER, UNIQUE(userid, link))").run();
+    this.db
+        .prepare(
+            "CREATE TABLE data (id INTEGER PRIMARY KEY AUTOINCREMENT, userid TEXT, title TEXT, link TEXT, duration INTEGER, timestamp TEXT, read INTEGER, UNIQUE(userid, link))"
+        )
+        .run();
   }
 
   checkTableExists() {
-    return this.db.prepare("SELECT name FROM sqlite_master WHERE name='data'").get();
+    return this.db
+        .prepare("SELECT name FROM sqlite_master WHERE name='data'")
+        .get();
   }
 
   getRecordsForUser(userid) {
-    return this.db.prepare("SELECT * FROM data WHERE userid=?").all(userid);
+    return this.db
+        .prepare("SELECT * FROM data WHERE userid=? AND read = 0")
+        .all(userid);
   }
 
-  saveItem(userid, title, link, duration){
+  saveItem(userid, title, link, duration) {
     //id INTEGER, userid TEXT, link TEXT, duration INTEGER, timestamp TEXT, read INTEGER)
     try {
-      this.db.prepare("INSERT INTO data (`userid`,`link`,`title`,`duration`,`timestamp`,`read`) VALUES (?,?,?,?,datetime('now'),0)").run(userid,link,title,duration);
+      this.db
+          .prepare(
+              "INSERT INTO data (`userid`,`link`,`title`,`duration`,`timestamp`,`read`) VALUES (?,?,?,?,datetime('now'),0)"
+          )
+          .run(userid, link, title, duration);
       return true;
     } catch (err) {
       return false;
     }
   }
 
-  setReadId(id){
+  setReadId(id) {
     this.db.prepare("UPDATE data SET read = 1 WHERE id = ?").run(id);
   }
 
-  getItem(userid, duration, usedItemIds = []){
-    return this.db.prepare("SELECT * FROM data WHERE userid = ? AND read = 0 AND `id` NOT IN (?) ORDER BY ABS(? - duration), id ASC").all(userid, usedItemIds.join(), duration);
+  getItemOffset(userid, offset) {
+    return this.db
+        .prepare(
+            "SELECT * FROM data WHERE userid = ? AND read = 0 LIMIT 1 OFFSET ?"
+        )
+        .get(userid, offset);
+    /*
+    this.db.prepare("SELECT * FROM data WHERE userid = ? AND read = 0 ORDER BY ABS(? - duration)", [userid, duration], (err, rows) => {
+    if (err) {
+      throw err;
+    }
+    rows.forEach((row) => {
+      console.log(row.name);
+    });
+      return rows;
+  });
+  */
+  }
+
+  getItem(userid, duration, usedItemIds = []) {
+    return this.db
+        .prepare(
+            "SELECT * FROM `data` WHERE `userid` = ? AND `read` = 0 AND `id` NOT IN (" +
+            usedItemIds.join() +
+            ") ORDER BY ABS(? - `duration`), `id` ASC"
+        )
+        .all(userid, duration);
     /*
     this.db.prepare("SELECT * FROM data WHERE userid = ? AND read = 0 ORDER BY ABS(? - duration)", [userid, duration], (err, rows) => {
     if (err) {

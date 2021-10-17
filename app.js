@@ -28,6 +28,13 @@ app.get("/calendarhook", (req, res) => {
     res.sendStatus(200);
 });
 
+app.get("/botlist", (req, res) => {
+    // Parse the request body from the POST
+    let body = req.body;
+    console.log(body);
+    res.sendStatus(200);
+});
+
 // Accepts POST requests at /webhook endpoint
 app.post("/ythook", async (req, res) => {
     // Parse the request body from the POST
@@ -272,12 +279,12 @@ async function handleMessage(senderPsid, receivedMessage) {
                         "❌ Sorry, the url is not accessible or the content is too long."
                 };
             }
-        } else if (receivedMessage.text.startsWith(".help")) {
+        } else if (receivedMessage.text.startsWith("Help")) {
             response = {
                 text:
-                    "Welcome to ViewLater, \n\nsend a link to save an article\n\n.list to view your saved articles\n\n.select <id> to an article a link from list\n\nsend number of minutes to get our AI recommendation for an article based on your time :)"
+                    "Welcome to ViewLater, \n\nsend a link to save an article\n\ntype List to view your saved articles\n\ntype Select <id> to an article a link from list\n\nSend number of minutes to get our AI recommendation for an article based on your time :)"
             };
-        } else if (receivedMessage.text.startsWith(".list")) {
+        } else if (receivedMessage.text.startsWith("List")) {
             const results = db.getRecordsForUser(senderPsid);
             if (results.length == 0) {
                 response = {
@@ -298,18 +305,23 @@ async function handleMessage(senderPsid, receivedMessage) {
                     if (index != results.length - 1) text += "\n\n";
                 });
                 response = {
-                    text: text + "\n\nUse .select <id> to view an article"
+                    text: text + "\n\ntype Select <number> to view an article"
                 };
             }
+        } else if (receivedMessage.text === "Get Started") {
+            response = {
+                text: "Welcome to ViewLater, Martin! I'm a bot who will remember content for later viewing and suggest you just at the right time!\n\nStart with sending me a link to save an article! Or tell me how much free time you have, and I will recommend something!"
+            }
+
         } else if (receivedMessage.text.startsWith(".count")) {
             response = {
                 text: "DB contains " + db.countRecords() + " records"
             };
-        } else if (receivedMessage.text.startsWith(".select")) {
+        } else if (receivedMessage.text.startsWith("Select")) {
             const arr = receivedMessage.text.split(" ");
             if (arr.length != 2 || isNaN(parseInt(arr[1]))) {
                 response = {
-                    text: "Wrong usage, use .select <id>"
+                    text: "Wrong usage, use Select <id>"
                 };
             } else {
                 response = await sendSelectedArticle(senderPsid, parseInt(arr[1]));
@@ -369,9 +381,14 @@ async function handleMessage(senderPsid, receivedMessage) {
 // Handles messaging_postbacks events
 async function handlePostback(senderPsid, receivedPostback) {
     let response;
-
+    let payload;
     // Get the payload for the postback
-    let payload = JSON.parse(receivedPostback.payload);
+    const allowedPayloads = ["Get Started", "List", "Help", "Connect Google Calendar", "Connect YouTube"];
+    if (allowedPayloads.includes(receivedPostback.payload)) {
+        payload = {"action": receivedPostback.payload};
+    } else {
+        payload = JSON.parse(receivedPostback.payload);
+    }
 
     switch (payload.action) {
         case "read":
@@ -384,6 +401,53 @@ async function handlePostback(senderPsid, receivedPostback) {
                 payload.data.time,
                 payload.data.usedItemIds
             );
+            break;
+        case "Get Started":
+            response = {
+                text: "Welcome to ViewLater, Martin! I'm a bot who will remember content for later viewing and suggest you just at the right time!\n\nStart with sending me a link to save an article! Or tell me how much free time you have, and I will recommend something!"
+            }
+            break;
+        case "Connect YouTube":
+            response = {
+                text: "✔️ Connected!"
+            }
+            break;
+        case "Connect Google Calendar":
+            response = {
+                text: "✔️ Connected!"
+            }
+            break;
+
+        case "Help":
+            response = {
+                text:
+                    "Welcome to ViewLater, \n\nsend a link to save an article\n\ntype List to view your saved articles\n\ntype Select <id> to an article a link from list\n\nSend number of minutes to get our AI recommendation for an article based on your time :)"
+            };
+            break;
+        case "List":
+            const results = db.getRecordsForUser(senderPsid);
+            if (results.length == 0) {
+                response = {
+                    text:
+                        "You have no articles saved :/\nStart your journey by sending links"
+                };
+            } else {
+                let text = "";
+                results.forEach((item, index) => {
+                    text +=
+                        index +
+                        1 +
+                        ") " +
+                        utf8.decode(item.title) +
+                        " (" +
+                        item.duration +
+                        " min)";
+                    if (index != results.length - 1) text += "\n\n";
+                });
+                response = {
+                    text: text + "\n\ntype Select <number> to view an article"
+                };
+            }
             break;
         default:
             response = { text: "Error" };
@@ -414,23 +478,26 @@ async function callSendAPI(senderPsid, response, animation = false) {
             message: response
         };
     }
-
-    // Send the HTTP request to the Messenger Platform
-    await request(
-        {
-            uri: "https://graph.facebook.com/v2.6/me/messages",
-            qs: { access_token: PAGE_ACCESS_TOKEN },
-            method: "POST",
-            json: requestBody
-        },
-        (err, _res, _body) => {
-            if (!err) {
-                console.log("Message sent!");
-            } else {
-                console.error("Unable to send message:" + err);
+    return new Promise(function (resolve, reject) {
+        // Send the HTTP request to the Messenger Platform
+        request(
+            {
+                uri: "https://graph.facebook.com/v2.6/me/messages",
+                qs: { access_token: PAGE_ACCESS_TOKEN },
+                method: "POST",
+                json: requestBody
+            },
+            (err, _res, _body) => {
+                if (!err) {
+                    console.log("Message sent!");
+                    resolve();
+                } else {
+                    console.error("Unable to send message:" + err);
+                    reject();
+                }
             }
-        }
-    );
+        );
+    });
 }
 
 function getActionsButton(title, savedItemId, time, usedItemIds = []) {

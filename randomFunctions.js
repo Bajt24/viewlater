@@ -13,10 +13,10 @@ export function getUrlFromMsg(msg) {
   return "";
 }
 
-
 export function getTimeFromMsg(msg) {
-  const match = msg.match(/^\d{1,}(:\d{2})?(:\d{2})?$/)
-      || msg.match(/^\d+(min|m| min| m|minutes| minutes)$/);
+  const match =
+      msg.match(/^\d{1,}(:\d{2})?(:\d{2})?$/) ||
+      msg.match(/^\d+(min|m| min| m|minutes| minutes)$/);
 
   if (match?.length) {
     return match[0];
@@ -27,12 +27,16 @@ export function getTimeFromMsg(msg) {
 const CONTENT_VIDEO = "VIDEO";
 const CONTENT_URL = "URL";
 export function getContentType(url) {
-  if (url.includes("youtube.com/watch") || url.includes("youtu.be") || url.includes("youtube.com/embed")) {
+  if (
+      url.includes("youtube.com/watch") ||
+      url.includes("youtu.be") ||
+      url.includes("youtube.com/embed")
+  ) {
     return CONTENT_VIDEO;
   } else if (getUrlFromMsg(url) !== "") {
     return CONTENT_URL;
   } else {
-    return ""
+    return "";
   }
 }
 
@@ -44,24 +48,24 @@ export async function getVideoLength(url) {
       "User-Agent": "Mozzila"
     },
     body: new URLSearchParams({
-      'q': url,
-      'vt': "home",
+      q: url,
+      vt: "home"
     })
   });
   const data = await res.json();
 
-  return Math.ceil(data?.t / 60)
+  return {duration: Math.ceil(data?.t / 60), title: data.title };
   // return data?.t;
 }
 
 export async function getDurationFromUrl(url) {
-  switch(getContentType(url)) {
+  switch (getContentType(url)) {
     case CONTENT_VIDEO:
       return getVideoLength(url);
     case CONTENT_URL:
       return getTextLengthFromUrl(url);
     default:
-      return ""
+      return "";
   }
 }
 
@@ -72,9 +76,16 @@ async function getTextLengthFromUrl(url) {
 
   try {
     const res = await fetch(url);
-    //TODO OMZENI NA VELIKOST STRANKY
+    if (res.status !== 200) {
+      return undefined;
+    }
     const data = await res.text();
-    console.log('length',data.length);
+    const humanReadSpeed = 250;
+    const avgWordLength = 4.7;
+    const maxDataLength = 60 * humanReadSpeed * avgWordLength * 1000;
+    if (maxDataLength < data.length) {
+      return undefined;
+    }
     const doc = new jsdom.JSDOM(data, "text/html");
     let mainElement = doc.window.document.querySelectorAll("article");
     if (!mainElement || !mainElement.length) {
@@ -93,9 +104,10 @@ async function getTextLengthFromUrl(url) {
     }
     mainText = mainText.replace(/\s+/g, " ");
     const countOfWords = mainText.split(" ").length;
-    const humanReadSpeed = 250;
-    return Math.ceil(countOfWords / humanReadSpeed);
+    let match = doc.window.document.querySelector('title').textContent;
+    return {duration: Math.ceil(countOfWords / humanReadSpeed), title: match};
   } catch (e) {
     console.error(e);
+    return undefined;
   }
 }

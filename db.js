@@ -10,11 +10,11 @@ export class Db {
     if (res == null)
       this.createTable();
 
-    console.log("====== V DATABAZI JE " + this.countRecords()["count"] + " ZAZNAMU, TY KRIPLE ======");
+    console.log("====== V DATABAZI JE " + this.countRecords()+ " ZAZNAMU, TY KRIPLE ======");
   }
 
   countRecords() {
-    return this.db.prepare("SELECT COUNT(*) as count FROM data").get();
+    return this.db.prepare("SELECT COUNT(*) as count FROM data").get()["count"];
   }
 
   deleteRecord(id){
@@ -22,7 +22,7 @@ export class Db {
   }
 
   createTable() {
-    this.db.prepare("CREATE TABLE data (id INTEGER AUTOINCREMENT, userid TEXT, link TEXT, duration INTEGER, timestamp TEXT, read INTEGER, PRIMARY KEY(id,userid))").run();
+    this.db.prepare("CREATE TABLE data (id INTEGER PRIMARY KEY AUTOINCREMENT, userid TEXT, title TEXT, link TEXT, duration INTEGER, timestamp TEXT, read INTEGER, UNIQUE(userid, link))").run();
   }
 
   checkTableExists() {
@@ -33,22 +33,22 @@ export class Db {
     return this.db.prepare("SELECT * FROM data WHERE userid=?").all(userid);
   }
 
-  saveItem(userid, link, duration){
-    //TODO DONT INSERT DUPLICATE
+  saveItem(userid, title, link, duration){
     //id INTEGER, userid TEXT, link TEXT, duration INTEGER, timestamp TEXT, read INTEGER)
-    console.log(this.db.prepare("INSERT INTO data (userid,link,duration,timestamp,read) VALUES (?,?,?,datetime('now'),0)").run(userid,link,duration));
+    try {
+      this.db.prepare("INSERT INTO data (`userid`,`link`,`title`,`duration`,`timestamp`,`read`) VALUES (?,?,?,?,datetime('now'),0)").run(userid,link,title,duration);
+      return true;
+    } catch (err) {
+      return false;
+    }
   }
 
   setReadId(id){
     this.db.prepare("UPDATE data SET read = 1 WHERE id = ?").run(id);
   }
 
-  getRandomItem(userid, duration, ignore) {
-
-  }
-
-  getItem(userid, duration){
-    return this.db.prepare("SELECT * FROM data WHERE userid = ? AND read = 0 ORDER BY ABS(? - duration), id ASC").all(userid, duration);
+  getItem(userid, duration, usedItemIds = []){
+    return this.db.prepare("SELECT * FROM data WHERE userid = ? AND read = 0 AND `id` NOT IN (?) ORDER BY ABS(? - duration), id ASC").all(userid, usedItemIds.join(), duration);
     /*
     this.db.prepare("SELECT * FROM data WHERE userid = ? AND read = 0 ORDER BY ABS(? - duration)", [userid, duration], (err, rows) => {
     if (err) {

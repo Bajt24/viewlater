@@ -41,9 +41,11 @@ app.post("/ythook", async (req, res) => {
     let body = req.body;
     console.log(body);
     let userid = "4017100845057314";
-    let duration = body.duration_formatted
+    let duration_sec = body.duration_formatted
         .split(":")
-        .reduce((acc, time) => 60 * acc + +time); //'0:0:26 to int
+        .reduce((acc, time) => 60 * acc + +time); //'0:0:26 to int (sec)
+    let duration = Math.ceil(duration_sec / 60);
+
     db.saveItem(userid, body.title, body.url, duration);
     res.sendStatus(200);
 });
